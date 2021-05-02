@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
 		cl::Context context = GetContext(platform_id, device_id);
 
 		//display the selected device
-		std::cout << "Runinng on " << GetPlatformName(platform_id) << ", " << GetDeviceName(platform_id, device_id) << std::endl;
+		std::cout << "Running on " << GetPlatformName(platform_id) << ", " << GetDeviceName(platform_id, device_id) << std::endl;
 
 		//create a queue to which we will push commands for the device
 		cl::CommandQueue queue(context);
@@ -54,11 +54,36 @@ int main(int argc, char **argv) {
 			throw err;
 		}
 
-		typedef int mytype;
+		typedef float mytype;
+
+		string temp;
+		string portion;
+
+		std::ifstream file;
+		std::vector<mytype> A;
+		std::vector<string> vec;
+
+		file.open("temp_lincolnshire_short.txt", ios::in);
+
+		if (!file) {
+			std::cerr << "Could not read file!" << std::endl;
+		}
+
+		while (file.good()) {
+			while (std::getline(file, temp)) {
+				stringstream ss(temp);
+				while (std::getline(ss, portion, ' ')) {
+					vec.push_back(portion);
+				}
+				A.push_back(stof(vec.back()));
+			}
+		}
+
+		std::cout << A << std::endl;
+
+		file.close();
 
 		//Part 3 - memory allocation
-		//host - input
-		std::vector<mytype> A(10, 1);//allocate 10 elements with an initial value 1 - their sum is 10 so it should be easy to check the results!
 
 		//the following part adjusts the length of the input vector so it can be run for a specific workgroup size
 		//if the total input length is divisible by the workgroup size
