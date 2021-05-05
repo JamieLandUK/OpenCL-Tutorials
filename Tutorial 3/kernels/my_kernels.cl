@@ -15,8 +15,10 @@ kernel void reduce_add(global const int* A, global int* B) {
 	}
 }
 
+
 // Bitonic sort - sorts through multiple steps.
 // Compare and Change
+
 kernel void cmpxchg(global int* A, global int* B, global bool* dir) {
 	// When downsweeping and the content of A is bigger than content of B...
 	// or when upsweeping and the content of B is bigger than the content of A...

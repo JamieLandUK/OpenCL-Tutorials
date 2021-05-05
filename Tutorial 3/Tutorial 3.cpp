@@ -30,9 +30,6 @@ int main(int argc, char **argv) {
 		//2.1 Select computing devices
 		cl::Context context = GetContext(platform_id, device_id);
 
-		// Get the device from the context which will be used later to decide our local size.
-		cl::Device device = context.getInfo<CL_CONTEXT_DEVICES>()[0];
-
 		//display the selected device
 		std::cout << "Running on " << GetPlatformName(platform_id) << ", " << GetDeviceName(platform_id, device_id) << std::endl;
 
@@ -61,7 +58,7 @@ int main(int argc, char **argv) {
 		cl::Event total_profile; // Gets the kernel execution time for all kernels
 		cl::Event A_profile; cl::Event B_profile; cl::Event C_profile; // Execution time for single kernels
 
-		typedef int mytype;
+		typedef float mytype;
 
 		// temporary values
 		string temp; // Holds entire strings
@@ -82,6 +79,8 @@ int main(int argc, char **argv) {
 		if (!file) {
 			// Tell the user.
 			std::cerr << "Could not read file!" << std::endl;
+			// End the program.
+			return 1;
 		}
 
 		// file.good finds if the current line of the file exists.
@@ -99,15 +98,15 @@ int main(int argc, char **argv) {
 				}
 				// We only want the last data item from the vector
 				// And it needs to be changed into a float and then pushed into the new vector.
-				A.push_back(stoi(vec.back()));
+				A.push_back(stof(vec.back()));
 				vec.clear(); // Clear the intermediary vector to save space.
 			}
 		}
 
+		file.close(); // Close the file.
+
 		// Print the vector for testing.
 		std::cout << "Unsorted: " << A << std::endl;
-
-		file.close(); // Close the file.
 		
 		
 		// We need the kernels to be defined here so we can get the work group info next.
@@ -115,6 +114,8 @@ int main(int argc, char **argv) {
 		cl::Kernel kernel_bitonic_sort = cl::Kernel(program, "bitonic_sort");
 		cl::Kernel kernel_min_max = cl::Kernel(program, "min_max");
 
+		// Get the device from the context which will be used later to decide our local size.
+		cl::Device device = context.getInfo<CL_CONTEXT_DEVICES>()[0];
 
 		//Part 3 - memory allocation
 		// It doesn't matter which kernel we use here
@@ -147,14 +148,13 @@ int main(int argc, char **argv) {
 		//device - buffers
 		cl::Buffer buffer_A(context, CL_MEM_READ_ONLY, input_size); // The input
 		cl::Buffer buffer_B(context, CL_MEM_READ_WRITE, output_size); // The mean
-		cl::Buffer buffer_C(context, CL_MEM_READ_WRITE, output_size); // Min and Max
-		// buffer_C is set to 2 because there should only be two outputs.
+		cl::Buffer buffer_C(context, CL_MEM_READ_WRITE, output_size); // min and max
 
 		//Part 4 - device operations
 
 		//4.1 copy array A to and initialise other arrays on device memory
 		queue.enqueueWriteBuffer(buffer_A, CL_TRUE, 0, input_size, &A[0]);
-		queue.enqueueWriteBuffer(buffer_C, CL_TRUE, 0, input_size, &C[0]);
+		queue.enqueueWriteBuffer(buffer_C, CL_TRUE, 0, input_size, &A[0]);
 		queue.enqueueFillBuffer(buffer_B, 0, 0, output_size);//zero B buffer on device memory
 
 		//4.2 Setup and execute all kernels (i.e. device code)
@@ -168,13 +168,13 @@ int main(int argc, char **argv) {
 		kernel_min_max.setArg(1, buffer_C);
 
 		//call all kernels in a sequence
-		queue.enqueueNDRangeKernel(kernel_reduce_add, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size));
 		queue.enqueueNDRangeKernel(kernel_bitonic_sort, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size));
+		queue.enqueueNDRangeKernel(kernel_reduce_add, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size));
 		queue.enqueueNDRangeKernel(kernel_min_max, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size));
 
 		// Profiling tasks
-		queue.enqueueNDRangeKernel(kernel_reduce_add, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size), NULL, &total_profile);
 		queue.enqueueNDRangeKernel(kernel_bitonic_sort, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size), NULL, &total_profile);
+		queue.enqueueNDRangeKernel(kernel_reduce_add, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size), NULL, &total_profile);
 		queue.enqueueNDRangeKernel(kernel_min_max, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size), NULL, &total_profile);
 
 		//4.3 Copy the result from device to host
@@ -185,7 +185,8 @@ int main(int argc, char **argv) {
 		//4.4 single kernel execution times
 		queue.enqueueWriteBuffer(buffer_A, CL_TRUE, 0, input_size, &A[0], NULL, &A_profile);
 		queue.enqueueWriteBuffer(buffer_B, CL_TRUE, 0, input_size, &B[0], NULL, &B_profile);
-		queue.enqueueWriteBuffer(buffer_C, CL_TRUE, 0, input_size, &C[0], NULL, &C_profile);
+		queue.enqueueWriteBuffer(buffer_C, CL_TRUE, 0, input_size, &A[0], NULL, &C_profile);
+
 
 		// Outputs
 		std::cout << "Sorted: " << A << std::endl; // The sorted vector
@@ -195,6 +196,12 @@ int main(int argc, char **argv) {
 		std::cout << " Lower quartile: " << A[std::floor(A.size() * 0.25)]; // The lower quartile
 		std::cout << " Minimum: " << C[0]; // The min
 		std::cout << " Maximum: " << C[1] << std::endl; // The max
+
+		// Reporting the kernel execution times
+		std::cout << "Total execution time: " << total_profile.getProfilingInfo<CL_PROFILING_COMMAND_END>() - total_profile.getProfilingInfo<CL_PROFILING_COMMAND_START>();
+		std::cout << "  Buffer A execution time: " << A_profile.getProfilingInfo<CL_PROFILING_COMMAND_END>() - A_profile.getProfilingInfo<CL_PROFILING_COMMAND_START>();
+		std::cout << " Buffer B execution time: " << B_profile.getProfilingInfo<CL_PROFILING_COMMAND_END>() - B_profile.getProfilingInfo<CL_PROFILING_COMMAND_START>();
+		std::cout << " Buffer C execution time: " << C_profile.getProfilingInfo<CL_PROFILING_COMMAND_END>() - C_profile.getProfilingInfo<CL_PROFILING_COMMAND_START>() << std::endl;
 	}
 	catch (cl::Error err) {
 		std::cerr << "ERROR: " << err.what() << ", " << getErrorString(err.err()) << std::endl;
