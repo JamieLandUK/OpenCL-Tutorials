@@ -19,7 +19,12 @@ void print_help() {
  * reading each portion of each line sequentially due to a smaller amount of reads.
  * After that, it creates kernels for each function: a sort function (used to find median, 1st and 3rd quartiles),
  * a reduce function that adds all of data together to find a mean (taken from Lecture 7's sorting algorithms and then updated
- * to manage 
+ * to manage the directions properly), a variance calculation function which uses another reduce to find the mean and then
+ * reducing and summing the variance together to produce the variance. The standard deviation is calculated in the host code.
+ * There is also a kernel made to retrieve the minimum and maximum of the provided file, this accepts the sorted vector manipulated by
+ * the sorting function and takes the first and last values.
+ * The sorting function implemented is a bitonic sort implementation which has also been taken (and edited) from the lecture slides.
+ * The total program execution time, memory transfer and kernel execution times are reported at the bottom of the program.
  */
 
 int main(int argc, char **argv) {
