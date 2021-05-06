@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <iomanip>
+#include <cmath>
 
 #include "Utils.h"
 
@@ -14,7 +15,7 @@ void print_help() {
 }
 
 /* Program description:
- * This main content of this program will accept in the file defined on line 77, which is read in from the Debug folder.
+ * This main content of this program will accept in the file defined on line 87, which is read in from the Debug folder.
  * It creates a vector which is then filled with the final portion of each line which is read in sequentially. This is faster than
  * reading each portion of each line sequentially due to a smaller amount of reads.
  * After that, it creates kernels for each function: a sort function (used to find median, 1st and 3rd quartiles),
@@ -84,7 +85,7 @@ int main(int argc, char **argv) {
 		// "temp_lincolnshire_short.txt" is 18732 records long.
 		// "temp_lincolnshire.txt" is 1873107 records long.
 		// Can be changed to point to a different file here.
-		file.open("temp_lincolnshire_short.txt", ios::in);
+		file.open("temp_lincolnshire_shorter.txt", ios::in);
 
 		// If the file hasn't been opened properly
 		// (or doesn't exist)...
@@ -122,6 +123,7 @@ int main(int argc, char **argv) {
 		cl::Kernel kernel_reduceadd = cl::Kernel(program, "reduce_add");
 		cl::Kernel kernel_bitonicsort = cl::Kernel(program, "bitonic_sort");
 		cl::Kernel kernel_minmax = cl::Kernel(program, "min_max");
+		cl::Kernel kernel_variance = cl::Kernel(program, "variance");
 
 		// Get the device from the context which will be used later to decide our local size.
 		cl::Device device = context.getInfo<CL_CONTEXT_DEVICES>()[0];
@@ -130,6 +132,7 @@ int main(int argc, char **argv) {
 		cl::Event A_profile; 
 		cl::Event B_profile; 
 		cl::Event C_profile; 
+		cl::Event D_profile;
 		// Execution time for single kernels
 		
 
@@ -160,6 +163,8 @@ int main(int argc, char **argv) {
 		size_t output_size = B.size()*sizeof(mytype);//size in bytes
 		// The vector which stores the minimum and maximum.
 		std::vector<mytype> C(input_elements);
+		// The vector for the variance
+		std::vector<mytype> D(input_elements);
 
 		// Print the vector for testing.
 		std::cout << "Unsorted: " << A << std::endl;
@@ -168,6 +173,7 @@ int main(int argc, char **argv) {
 		cl::Buffer buffer_A(context, CL_MEM_READ_ONLY, input_size); // The input
 		cl::Buffer buffer_B(context, CL_MEM_READ_WRITE, output_size); // The mean
 		cl::Buffer buffer_C(context, CL_MEM_READ_WRITE, output_size); // min and max
+		cl::Buffer buffer_D(context, CL_MEM_READ_WRITE, output_size); // Variance
 
 		//Part 4 - device operations
 
@@ -175,6 +181,7 @@ int main(int argc, char **argv) {
 		queue.enqueueWriteBuffer(buffer_A, CL_TRUE, 0, input_size, &A[0]);
 		queue.enqueueWriteBuffer(buffer_C, CL_TRUE, 0, input_size, &A[0]);
 		queue.enqueueFillBuffer(buffer_B, 0, 0, output_size);//zero B buffer on device memory
+		queue.enqueueFillBuffer(buffer_D, 0, 0, output_size);
 
 		//4.2 Setup and execute all kernels (i.e. device code)
 		// SORTING
@@ -185,18 +192,24 @@ int main(int argc, char **argv) {
 		// MIN AND MAX
 		kernel_minmax.setArg(0, buffer_A);
 		kernel_minmax.setArg(1, buffer_C);
+		// VARIANCE
+		kernel_variance.setArg(0, buffer_A);
+		kernel_variance.setArg(1, buffer_D);
 
 		//call all kernels in a sequence
 		queue.enqueueNDRangeKernel(kernel_reduceadd, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size));
 		queue.enqueueNDRangeKernel(kernel_bitonicsort, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size));
 		queue.enqueueNDRangeKernel(kernel_minmax, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size));
+		queue.enqueueNDRangeKernel(kernel_variance, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size));
 
 		// Profiling tasks
 		queue.enqueueNDRangeKernel(kernel_reduceadd, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size), NULL, &total_profile);
 		queue.enqueueNDRangeKernel(kernel_bitonicsort, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size), NULL, &total_profile);
 		queue.enqueueNDRangeKernel(kernel_minmax, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size), NULL, &total_profile);
+		queue.enqueueNDRangeKernel(kernel_variance, cl::NullRange, cl::NDRange(input_elements), cl::NDRange(local_size), NULL, &total_profile);
 
 		//4.3 Copy the result from device to host
+		queue.enqueueReadBuffer(buffer_D, CL_TRUE, 0, output_size, &D[0]);
 		queue.enqueueReadBuffer(buffer_C, CL_TRUE, 0, output_size, &C[0]);
 		queue.enqueueReadBuffer(buffer_B, CL_TRUE, 0, output_size, &B[0]);
 		queue.enqueueReadBuffer(buffer_A, CL_TRUE, 0, output_size, &A[0]);
@@ -205,23 +218,26 @@ int main(int argc, char **argv) {
 		queue.enqueueWriteBuffer(buffer_A, CL_TRUE, 0, input_size, &A[0], NULL, &A_profile);
 		queue.enqueueWriteBuffer(buffer_B, CL_TRUE, 0, input_size, &B[0], NULL, &B_profile);
 		queue.enqueueWriteBuffer(buffer_C, CL_TRUE, 0, input_size, &A[0], NULL, &C_profile);
+		queue.enqueueWriteBuffer(buffer_D, CL_TRUE, 0, input_size, &B[0], NULL, &D_profile);
 
 		float mean = B[0] / A.size();
 
 		// Outputs
 		std::cout << "Sorted: " << A << std::endl; // The sorted vector
 		std::cout << "Mean: " << std::fixed << std::setprecision(2) << mean; // The mean/average
-		std::cout << " Median: " << A[std::floor(A.size() / 2)]; // The median
-		std::cout << " Upper quartile: " << A[std::floor(A.size() * 0.75)]; // The upper quartile
-		std::cout << " Lower quartile: " << A[std::floor(A.size() * 0.25)]; // The lower quartile
-		std::cout << " Minimum: " << C[1]; // The min
-		std::cout << " Maximum: " << C[0] << std::endl; // The max
+		std::cout << "  Median: " << A[std::floor(A.size() / 2)]; // The median
+		std::cout << "  Upper quartile: " << A[std::floor(A.size() * 0.75)]; // The upper quartile
+		std::cout << "  Lower quartile: " << A[std::floor(A.size() * 0.25)]; // The lower quartile
+		std::cout << "  Minimum: " << C[1]; // The min
+		std::cout << "  Maximum: " << C[0]; // The max
+		std::cout << "  Standard Deviation: " << sqrt(D[0]) << std::endl;
 
 		// Reporting the kernel execution times
 		std::cout << "Total execution time: " << total_profile.getProfilingInfo<CL_PROFILING_COMMAND_END>() - total_profile.getProfilingInfo<CL_PROFILING_COMMAND_START>();
 		std::cout << "  Buffer A execution time: " << A_profile.getProfilingInfo<CL_PROFILING_COMMAND_END>() - A_profile.getProfilingInfo<CL_PROFILING_COMMAND_START>();
-		std::cout << " Buffer B execution time: " << B_profile.getProfilingInfo<CL_PROFILING_COMMAND_END>() - B_profile.getProfilingInfo<CL_PROFILING_COMMAND_START>();
-		std::cout << " Buffer C execution time: " << C_profile.getProfilingInfo<CL_PROFILING_COMMAND_END>() - C_profile.getProfilingInfo<CL_PROFILING_COMMAND_START>() << std::endl;
+		std::cout << "  Buffer B execution time: " << B_profile.getProfilingInfo<CL_PROFILING_COMMAND_END>() - B_profile.getProfilingInfo<CL_PROFILING_COMMAND_START>();
+		std::cout << "  Buffer C execution time: " << C_profile.getProfilingInfo<CL_PROFILING_COMMAND_END>() - C_profile.getProfilingInfo<CL_PROFILING_COMMAND_START>();
+		std::cout << "  Buffer D execution time: " << D_profile.getProfilingInfo<CL_PROFILING_COMMAND_END>() - D_profile.getProfilingInfo<CL_PROFILING_COMMAND_START>() << std::endl;
 	}
 	catch (cl::Error err) {
 		std::cerr << "ERROR: " << err.what() << ", " << getErrorString(err.err()) << std::endl;
