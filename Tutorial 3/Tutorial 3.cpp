@@ -14,8 +14,11 @@ void print_help() {
 	std::cerr << "  -h : print this message" << std::endl;
 }
 
+// Completed for an assignment as part of CMP3752M Parallel Programming @ University of Lincoln
+// LAN18668469, Jamie Stephen Land
+
 /* Program description:
- * This main content of this program will accept in the file defined on line 87, which is read in from the Debug folder.
+ * This main content of this program will accept in the file defined on line 91, which is read in from the Debug folder.
  * It creates a vector which is then filled with the final portion of each line which is read in sequentially. This is faster than
  * reading each portion of each line sequentially due to a smaller amount of reads.
  * After that, it creates kernels for each function: a sort function (used to find median, 1st and 3rd quartiles),
